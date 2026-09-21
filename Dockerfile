@@ -6,10 +6,11 @@ WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile || pnpm approve-builds --all
 RUN pnpm install --frozen-lockfile
 
 COPY . .
-RUN pnpm run build
+RUN pnpm approve-builds --all && pnpm run build
 
 # Runtime stage for serving the application
 FROM nginx:mainline-alpine-slim AS runtime
