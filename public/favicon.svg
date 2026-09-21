@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <radialGradient id="moonGrad" cx="35%" cy="35%" r="75%">
+      <stop offset="0%" stop-color="#fff6d8"/>
+      <stop offset="55%" stop-color="#f3d98a"/>
+      <stop offset="100%" stop-color="#d9ad55"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#f3d98a" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#f3d98a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <circle cx="100" cy="100" r="95" fill="url(#glow)"/>
+
+  <g opacity="0.85">
+    <circle cx="30" cy="40" r="1.6" fill="#f3d98a"/>
+    <circle cx="170" cy="55" r="1.3" fill="#f3d98a"/>
+    <circle cx="22" cy="140" r="1.3" fill="#f3d98a"/>
+    <circle cx="178" cy="130" r="1.6" fill="#f3d98a"/>
+    <circle cx="100" cy="18" r="1.2" fill="#f3d98a"/>
+    <circle cx="100" cy="182" r="1.2" fill="#f3d98a"/>
+    <circle cx="45" cy="170" r="1.1" fill="#f3d98a"/>
+    <circle cx="155" cy="25" r="1.1" fill="#f3d98a"/>
+  </g>
+
+  <path d="M124 38
+           C88 38 60 66 60 100
+           C60 134 88 162 124 162
+           C100 148 84 126 84 100
+           C84 74 100 52 124 38 Z"
+        fill="url(#moonGrad)"/>
+</svg>
