@@ -10,7 +10,7 @@ RUN pnpm install --frozen-lockfile || pnpm approve-builds --all
 RUN pnpm install --frozen-lockfile
 
 COPY . .
-RUN pnpm approve-builds --all && pnpm run build
+RUN pnpm run build || (pnpm approve-builds --all && pnpm run build)
 
 # Runtime stage for serving the application
 FROM nginx:mainline-alpine-slim AS runtime
