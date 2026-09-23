@@ -8,6 +8,13 @@ featured: true
 draft: false
 ---
 
+> Update, 2026-09-23: a security review of this design led to a second round of adversarial tests,
+> and several of them failed. [Part 2](/posts/envelope-encryption-hardening-review) covers what they
+> found and what changed. Three statements below were wrong and have been corrected in place: the audit
+> trail did not record every read under concurrency, the DEK cache was keyed on something a forced
+> rotation does not change, and document ids could collide between tenants. The code samples show the
+> vault as it was when this post was first published.
+
 Storing a tenant's API keys and database passwords feels finished the moment the ciphertext lands
 in the database. It isn't. Encrypting a value is the easy half of this problem, and it is the half
 most write-ups stop at.
@@ -195,6 +202,10 @@ provider as an API key. GCM's tag makes that impossible: if a single byte moved,
 and the request fails. A failed read is an incident you find out about in the logs. A silently wrong
 read is one you find out about from your payment provider.
 
+What the tag does not do is tie a ciphertext to the row it sits in. An intact ciphertext moved onto a
+different secret authenticates just as happily there. Part 2 shows that happening and the fix, which
+is associated data.
+
 The other line to notice is the nonce, freshly random on every encryption. It means encrypting the
 same value twice yields completely different ciphertext both times. Someone who steals the entire
 table cannot tell which tenants share a password, or whether the value stored today matches the one
@@ -204,8 +215,9 @@ it. There is a popular feature later in this post that quietly throws it away.
 ## Where the ciphertext lives, and the version I had to undo
 
 The vault is event sourced, one stream per tenant. That choice was made for the audit trail, and it
-pays off immediately: every write, every read, every rotation arrives timestamped and in order,
-without anyone writing audit logging code. For a component whose entire job is guarding credentials,
+pays off immediately: writes, reads and rotations arrive timestamped and in order, without anyone
+writing audit logging code. (Not every read, as it turned out. Under a burst of concurrent reads most
+of the access events lost a race for the stream and were dropped; part 2 has the numbers and the fix.) For a component whose entire job is guarding credentials,
 being able to answer "who touched this, and when" is close to a requirement.
 
 So the first version put the secrets in the stream too. The `SecretStored` event carried the nonce,
@@ -283,7 +295,8 @@ lifetime instead:
 
 After the change, `SecretStored` carries a name and a timestamp and nothing else. The ciphertext
 moved to an ordinary mutable row, one per tenant and secret name, deleted the way you delete any
-row. The aggregate kept only the key bookkeeping, which was never secret material in the first
+row. (One per tenant and name was the intent. The row id was the two joined with a colon, so tenant
+`acme:x` could overwrite tenant `acme`'s secret `x:y`. Tenant ids can no longer contain one.) The aggregate kept only the key bookkeeping, which was never secret material in the first
 place:
 
 ```csharp
@@ -500,12 +513,12 @@ tools, and the whole rotation design falls out of refusing to conflate them.
   </g>
   <g fill="currentColor" font-family="ui-sans-serif, system-ui" font-size="11" opacity="0.75">
     <text x="30" y="58">tenant + name</text>
-    <text x="30" y="146">keyed by key version</text>
+    <text x="30" y="146">keyed by DEK version</text>
     <text x="230" y="146">only on a cache miss</text>
     <text x="30" y="234">fails closed on a bad tag</text>
     <text x="230" y="234">version compare, then age</text>
     <text x="448" y="234">wrapping only, not the DEK</text>
-    <text x="448" y="316">evict cache, re-cache under new version</text>
+    <text x="448" y="316">in a queued handler, one per tenant</text>
   </g>
   <g fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrow2)">
     <path d="M 82 72 L 82 104" />
@@ -539,28 +552,30 @@ re-encryption it replaced.
 Two caches fix it. They look similar and they exist for completely different reasons, which is worth
 separating.
 
-The first caches the plaintext DEK, keyed by tenant and key version, with a five minute TTL.
-Repeated reads for the same tenant inside that window never touch KMS at all. The cache itself is
-unremarkable. The eviction is where the thought went. Keying by key version is not sufficient on its
-own, because after a rewrap the stale entry is not wrong, merely orphaned, and it would sit there
-holding a plaintext key in memory until its TTL happened to lapse. That is the one thing you do not
-want lying around. So each tenant's entries hang off a cancellation token, and `Evict` cancels it to
-force them out immediately:
+The first caches the plaintext DEK, per tenant, with a five minute TTL. Repeated reads for the same
+tenant inside that window never touch KMS at all. Each tenant's entries hang off a cancellation
+token, so a forced rotation can call `Evict` and drop the old plaintext DEK at once instead of leaving
+it in memory for the rest of its TTL:
 
 ```csharp
-public void Set(string tenantId, string keyVersionId, byte[] plaintextDek)
+public void Set(string tenantId, int dekVersion, byte[] plaintextDek)
 {
     var tokenSource = _tenantTokens.GetOrAdd(tenantId, static _ => new CancellationTokenSource());
 
-    using var entry = cache.CreateEntry(CacheKey(tenantId, keyVersionId));
+    using var entry = cache.CreateEntry(CacheKey(tenantId, dekVersion));
     entry.Value = plaintextDek;
     entry.AbsoluteExpirationRelativeToNow = _ttl;
     entry.AddExpirationToken(new CancellationChangeToken(tokenSource.Token));
 }
 ```
 
-Both the rewrap path and the forced rotation path call `Evict` then `Set`, so a rotation drops
-the old plaintext DEK immediately rather than leaving it live for the remainder of its TTL.
+This section originally said the cache was keyed by tenant and KMS key version, and presented the
+eviction as closing the gap after a rotation. Both were wrong. A forced rotation mints a new DEK under
+the same master key, so the key version does not change, and another instance that had cached the old
+DEK kept finding it under the same key and encrypting new writes with it. And `Evict` only ever
+reaches the process it runs in. The cache is now keyed by which of the tenant's DEKs it holds, so other
+instances stop using a retired DEK as soon as they read the new one from the stream. They still hold
+it in memory until their TTL runs out. Part 2 walks through the failure.
 
 This cache is a deliberate departure from what AWS tells you to do. The `GenerateDataKey` reference
 says, twice, to get rid of the plaintext key the moment you are done with it:
