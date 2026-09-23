@@ -4,7 +4,7 @@ pubDatetime: 2026-09-23T00:00:00Z
 title: 'Envelope encryption, part 2: what someone with database access can make the vault do'
 description: "A security review of the multi-tenant secret vault from part 1 asked what happens when the attacker is already inside the database, or when there is more than one app instance. I wrote the tests before touching the code. Seven of nine failed, and two of my fixes were wrong the first time."
 tags: [security, cryptography, dotnet, event-sourcing, aws, testing]
-featured: false
+featured: true
 draft: false
 ---
 
